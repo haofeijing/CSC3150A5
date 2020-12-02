@@ -68,6 +68,10 @@ struct DataIn {
     short c;
 } *dataIn;
 
+static int dev_major;
+static int dev_minor;
+static struct cdev *dev_cdevp;
+
 
 // Arithmetic funciton
 static void drv_arithmetic_routine(struct work_struct* ws);
@@ -125,13 +129,37 @@ static int __init init_modules(void) {
     
 	printk("%s:%s():...............Start...............\n", PREFIX_TITLE, __func__);
 
-	/* Register chrdev */ 
-
-	/* Init cdev and make it alive */
-
 	/* Allocate DMA buffer */
 
 	/* Allocate work routine */
+
+	/* Register chrdev */ 
+	dev_t dev;
+	int ret = 0;
+
+	ret = alloc_chrdev_region(&dev, 0, 1, "mydev");
+	if(ret)
+	{
+		printk("Cannot alloc chrdev\n");
+		return ret;
+	}
+	
+	dev_major = MAJOR(dev);
+	dev_minor = MINOR(dev);
+	printk("%s:%s():register chrdev(%d,%d)\n",PREFIX_TITLE,__FUNCTION__,dev_major,dev_minor);
+
+	/* Init cdev and make it alive */
+
+	dev_cdevp = cdev_alloc();
+
+	cdev_init(dev_cdevp, &fops);
+	dev_cdevp->owner = THIS_MODULE;
+	ret = cdev_add(dev_cdevp, MKDEV(dev_major, dev_minor), 1);
+	if(ret < 0)
+	{
+		printk("Add chrdev failed\n");
+		return ret;
+	}
 
 	return 0;
 }
@@ -141,6 +169,15 @@ static void __exit exit_modules(void) {
 	/* Free DMA buffer when exit modules */
 
 	/* Delete character device */
+
+	dev_t dev;
+	
+	dev = MKDEV(dev_major, dev_minor);
+	cdev_del(dev_cdevp);
+
+	printk("%s:%s():unregister chrdev\n",PREFIX_TITLE,__FUNCTION__);
+	unregister_chrdev_region(dev, 1);
+
 
 	/* Free work routine */
 

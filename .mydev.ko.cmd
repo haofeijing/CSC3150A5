@@ -1,0 +1,1 @@
+cmd_/media/sf_Shared/A5/source/mydev.ko := ld -r -m elf_i386 -T ./scripts/module-common.lds --build-id  -o /media/sf_Shared/A5/source/mydev.ko /media/sf_Shared/A5/source/mydev.o /media/sf_Shared/A5/source/mydev.mod.o ;  true
