@@ -72,6 +72,9 @@ static int dev_major;
 static int dev_minor;
 static struct cdev *dev_cdevp;
 
+void *dma_buf;
+static struct work_struct *work;
+
 
 // Arithmetic funciton
 static void drv_arithmetic_routine(struct work_struct* ws);
@@ -110,28 +113,155 @@ static int drv_release(struct inode* ii, struct file* ff) {
 }
 static ssize_t drv_read(struct file *filp, char __user *buffer, size_t ss, loff_t* lo) {
 	/* Implement read operation for your device */
+	int readable = myini(DMAREADABLEADDR);
+	while (readable == 0) {
+		msleep(1000);
+		readable = myini(DMAREADABLEADDR);
+	}
+	int answer = myini(DMAANSADDR);
+	printk("%s:%s(): ans = %d\n", PREFIX_TITLE, __func__, answer);
+	put_user(myini(DMAANSADDR), (int *)buffer);
+	myouti(0, DMAREADABLEADDR);
 	return 0;
 }
 static ssize_t drv_write(struct file *filp, const char __user *buffer, size_t ss, loff_t* lo) {
 	/* Implement write operation for your device */
+	int IOMode = myini(DMABLOCKADDR);
+	// printk("%s:%s(): IO Mode is %d\n", PREFIX_TITLE, __func__, IOMode);
+
+	struct DataIn data;
+	get_user(data.a,(char *)buffer);
+	get_user(data.b,(int *)buffer + 1);
+	get_user(data.c,(int *)buffer + 2);
+	
+	myoutc(data.a,DMAOPCODEADDR);
+	myouti(data.b,DMAOPERANDBADDR);
+	myouts(data.c,DMAOPERANDCADDR);
+
+	INIT_WORK(work, drv_arithmetic_routine);
+	printk("%s:%s(): queue work\n", PREFIX_TITLE, __func__);
+
+	// Decide io mode
+	if(IOMode) {
+		// Blocking IO
+		printk("%s:%s(): block\n", PREFIX_TITLE, __func__);
+		schedule_work(work);
+		flush_scheduled_work();
+    	} 
+	else {
+		// Non-locking IO
+		printk("%s,%s(): non-blocking\n",PREFIX_TITLE, __func__);
+		schedule_work(work);
+   	 }
 	return 0;
 }
 static long drv_ioctl(struct file *filp, unsigned int cmd, unsigned long arg) {
 	/* Implement ioctl setting for your device */
+	int value;
+	get_user(value, (int *)arg);
+	int readable = myini(DMAREADABLEADDR);
+	switch (cmd) {
+		case HW5_IOCSETSTUID:
+			myouti(value, DMASTUIDADDR);
+			printk("%s,%s(): My STUID is = %d\n",PREFIX_TITLE, __func__, value);
+			break;
+		case HW5_IOCSETRWOK: 
+			myouti(value, DMARWOKADDR);	
+			if (value == 1) {
+			printk("%s,%s(): RW OK \n",PREFIX_TITLE, __func__);
+			}
+			break;
+		case HW5_IOCSETIOCOK: 
+			myouti(value, DMAIOCOKADDR);
+			if (value == 1) {
+				printk("%s,%s(): IOC OK \n",PREFIX_TITLE, __func__);	
+			}
+			break;
+		case HW5_IOCSETIRQOK: 
+		// for bonus
+			break;
+		case HW5_IOCSETBLOCK:
+			myouti(value, DMABLOCKADDR);
+			if (value == 1) {
+				printk("%s,%s(): Blocking IO \n",PREFIX_TITLE, __func__);	
+			} else {
+				printk("%s,%s(): Non-Blocking IO \n",PREFIX_TITLE, __func__);
+			}
+			break;
+		case HW5_IOCWAITREADABLE:				
+			while(readable == 0){
+				msleep(5000);
+				readable = myini(DMAREADABLEADDR);
+			}
+			printk("%s:%s(): Wait readable: %d",PREFIX_TITLE, __func__, readable);
+			put_user(readable, (int *)arg);
+			break;	
+	}
+
 	return 0;
+}
+
+static int prime(int base, short nth){
+	int fnd=0;
+    int i, num, isPrime;
+
+    num = base;
+    while(fnd != nth) {
+        isPrime=1;
+        num++;
+        for(i=2;i<=num/2;i++) {
+            if(num%i == 0) {
+                isPrime=0;
+                break;
+            }
+        }
+        
+        if(isPrime) {
+            fnd++;
+        }
+    }
+    return num;
 }
 
 static void drv_arithmetic_routine(struct work_struct* ws) {
 	/* Implement arthemetic routine */
+	struct DataIn data;
+    int ans;
+
+    data.a = myinc(DMAOPCODEADDR);
+    data.b = myini(DMAOPERANDBADDR);
+    data.c = myins(DMAOPERANDCADDR);
+
+    switch(data.a) {
+        case '+':
+            ans=data.b+data.c;
+            break;
+        case '-':
+            ans=data.b-data.c;
+            break;
+        case '*':
+            ans=data.b*data.c;
+            break;
+        case '/':
+            ans=data.b/data.c;
+            break;
+        case 'p':
+            ans = prime(data.b, data.c);
+            break;
+        default:
+            ans=0;
+    }
+
+	myouti(ans, DMAANSADDR);
+	myouti(1, DMAREADABLEADDR);
+	printk("%s:%s():%d %c %d = %d\n\n",PREFIX_TITLE, __func__, data.b, data.a, data.c, ans);
 }
 
 static int __init init_modules(void) {
     
 	printk("%s:%s():...............Start...............\n", PREFIX_TITLE, __func__);
 
-	/* Allocate DMA buffer */
 
-	/* Allocate work routine */
 
 	/* Register chrdev */ 
 	dev_t dev;
@@ -161,12 +291,24 @@ static int __init init_modules(void) {
 		return ret;
 	}
 
+	/* Allocate DMA buffer */
+
+	dma_buf = kzalloc(DMA_BUFSIZE, GFP_KERNEL);
+	printk("%s:%s():allocate dma buffer\n",PREFIX_TITLE,__FUNCTION__);
+
+
+	/* Allocate work routine */
+	work = kmalloc(sizeof(typeof(*work)), GFP_KERNEL);
+
 	return 0;
 }
 
 static void __exit exit_modules(void) {
 
 	/* Free DMA buffer when exit modules */
+	kfree(dma_buf);
+	printk("%s:%s():free dma buffer\n",PREFIX_TITLE, __FUNCTION__);
+
 
 	/* Delete character device */
 
@@ -180,6 +322,7 @@ static void __exit exit_modules(void) {
 
 
 	/* Free work routine */
+	kfree(work);
 
 
 	printk("%s:%s():..............End..............\n", PREFIX_TITLE, __func__);
