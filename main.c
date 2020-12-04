@@ -16,7 +16,8 @@
 MODULE_LICENSE("GPL");
 
 #define PREFIX_TITLE "OS_AS5"
-
+// typedef irqreturn_t (*irq_handler_t)(int, void *);
+#define IRQ_NUM 1
 
 // DMA
 #define DMA_BUFSIZE 64
@@ -72,8 +73,10 @@ static int dev_major;
 static int dev_minor;
 static struct cdev *dev_cdevp;
 
-void *dma_buf;
 static struct work_struct *work;
+
+static int IRQ_Count = 0;
+static irqreturn_t irq_handler(int irq, void *dev_id);
 
 
 // Arithmetic funciton
@@ -257,10 +260,20 @@ static void drv_arithmetic_routine(struct work_struct* ws) {
 	printk("%s:%s():%d %c %d = %d\n\n",PREFIX_TITLE, __func__, data.b, data.a, data.c, ans);
 }
 
+static irqreturn_t irq_handler(int irq, void *dev_id) {
+	// printk("%s:%s(): IQR occurred \n",PREFIX_TITLE, __func__);
+	IRQ_Count += 1;
+	return IRQ_HANDLED;
+}
+
 static int __init init_modules(void) {
     
 	printk("%s:%s():...............Start...............\n", PREFIX_TITLE, __func__);
 
+	/* Request IRQ */
+	free_irq(IRQ_NUM, NULL);
+	int irq = request_irq(IRQ_NUM, irq_handler, IRQF_SHARED, "myirq", (void *)(irq_handler));
+	printk("%s:%s(): request irq %d return %d\n",PREFIX_TITLE,__FUNCTION__, IRQ_NUM, irq);
 
 
 	/* Register chrdev */ 
@@ -304,6 +317,10 @@ static int __init init_modules(void) {
 }
 
 static void __exit exit_modules(void) {
+
+	/* Free IRQ */
+	free_irq(IRQ_NUM, (void *)(irq_handler));
+	printk("%s:%s(): interrupt count = %d\n", PREFIX_TITLE, __FUNCTION__, IRQ_Count);
 
 	/* Free DMA buffer when exit modules */
 	kfree(dma_buf);
